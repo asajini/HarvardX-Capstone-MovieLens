@@ -18,7 +18,7 @@ urlcolor: blue
 ```{r setup, include=FALSE}
 #global options
 
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align="center",cache = TRUE, fig.path='Figs/',out.width="60%",fig.pos = "!h")
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align="center",cache = FALSE, fig.path='Figs/',out.width="60%",fig.pos = "!h")
 ```
 
 
@@ -28,6 +28,9 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align="
 
 ```{r lib, include=FALSE, eval=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,cache = TRUE)
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
@@ -35,12 +38,18 @@ if(!require(dslabs)) install.packages("dslabs", repos = "http://cran.us.r-projec
 if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
 if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
 if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
-#if(!require(Matrix)) install.packages("Matrix", repos = "http://cran.us.r-project.org")
-#if(!require(Kable)) install.packages("Kable", repos = "http://cran.us.r-project.org")
+if(!require(Matrix)) install.packages("Matrix", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+
 ```
 
 ``` {r loadlib, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,cache = TRUE)
+
+library(tidyverse)
+library(caret)
+library(data.table)
 library(tidyverse)
 library(ggplot2)
 library(dslabs)
@@ -49,8 +58,9 @@ library(kableExtra)
 library(lubridate)
 library(Matrix)
 library(scales)
-library(caret)
-library(data.table)
+library(dplyr)
+options(warn=-1)
+options(dplyr.summarise.inform = FALSE)
 ```
 
 
@@ -67,13 +77,13 @@ To develop the recommendation we are going to split the data into training and v
 ```{r loaddata, include=FALSE}
 #Rdata run and stored in local folder for faster knitting
 
-load("~/GitHub/movie_lens_16.RData")
+#load("~/GitHub/movie_lens_16.RData")
 ```
 
 
 ## Loading Data from EDX
 
-```{r datasetup, eval=FALSE, cache=TRUE}
+```{r datasetup, eval=TRUE, cache=TRUE}
 # MovieLens 10M dataset:
 # https://grouplens.org/datasets/movielens/10m/
 # http://files.grouplens.org/datasets/movielens/ml-10m.zip
@@ -315,17 +325,14 @@ validation_mod <- validation_mod %>%
   select(-first_split)
 ```
 
-```{r partition, eval=FALSE}
+```{r partition, eval=TRUE,cache = TRUE}
 #creating test and training set from edx
 set.seed(1, sample.kind="Rounding")
-test_index <- createDataPartition(y = edx_mod$rating, times = 1, p = 0.1, list = FALSE) #90-10 split
+test_index <- createDataPartition(y = edx_mod$rating, times = 1, p = 0.1, list = FALSE) 
+#90-10 split
 
 train_edx <- edx_mod[-test_index,]
 temp <- edx_mod[test_index,]
-nrow(edx_mod)
-names(test_edx)
-nrow(train_edx)
-
 
 # Check to ensure all 'users' and 'movies' from test are in training set
 test_edx <- temp %>% 
@@ -337,7 +344,7 @@ test_edx <- temp %>%
 ```{r loadedx, include=FALSE}
 #split data is stored as Rdata and loaded for faster knitting
 
-load("~/GitHub/edx_partitioned.RData")
+#load("~/GitHub/edx_partitioned.RData")
 ```
 Let's move on to our models now.
 
@@ -506,10 +513,12 @@ we get an RMSE of `r release_year_rmse`. Let's focus on validation set now.
 
 ## Prediction on Validation set
 
-Let's use our model on the validation set now to see how it fairs. We get a RMSE of `r rmse_val` which although is close, is not what we want. So we will look into regularization now.
+Let's use our model on the validation set now to see how it fairs. 
 
-```{r valpred, echo = TRUE, cache = FALSE}
+```{r valpred, echo = TRUE, cache=FALSE}
 # Predicting on the 'Validation' data
+
+library(dplyr)
 predicted_val <- validation_mod %>%
   left_join(movie_bias, by = "movieId") %>%
   left_join(user_bias, by = "userId") %>%
@@ -521,6 +530,8 @@ predicted_val[is.na(predicted_val)] <- 0 #setting 4NA's to 0
 rmse_val <- RMSE(predicted_val, validation_mod$rating)
 rmse_val
 ```
+We get a RMSE of `r rmse_val` which although is close, is not what we want. So we will look into regularization now.
+
 
 # Regularization
 
@@ -635,7 +646,7 @@ predicted_ratings_regularized <- validation_mod %>%
 ```
 
 
-```{r predictionval,echo = TRUE}
+```{r predictionval,echo = TRUE,cache = FALSE}
 
 #prediction on validation(hand out) set
 validation_rmse <- RMSE(validation_mod$rating, predicted_ratings_regularized)
@@ -643,12 +654,12 @@ validation_rmse
 ```
 
 By using the three biases, we are able to bring down the error value to 
-`r valid_rmse` which is under the acceptable limit given by this project. 
+`r validation_rmse` which is under the acceptable limit given by this project. 
 
   
 # Conclusion
 
-The objective of this project is to analyze the Movies lens 10M dataset and build a recommendation with least errors. Through our analysis, we looked into every category and found out how they affected the ratings. We took into account 3 biases, Movie, User and release year to help reduce our prediction errors. The project statement is to reduce the RMSE to *0.86490* or less and our model produced an error of *`r valid_rmse`* on the final hold out set.
+The objective of this project is to analyze the Movies lens 10M dataset and build a recommendation with least errors. Through our analysis, we looked into every category and found out how they affected the ratings. We took into account 3 biases, Movie, User and release year to help reduce our prediction errors. The project statement is to reduce the RMSE to *0.86490* or less and our model produced an error of *`r validation_rmse`* on the final hold out set.
 
 This particular recommendation is built on the ones that were taught in the course. Including another bias will also reduce the error by some value. Although, they didn’t prove much effective in our model, we stuck to just 3 biases. Apart from this, we can also use Matrix factorization, XG boost or KNN.
 

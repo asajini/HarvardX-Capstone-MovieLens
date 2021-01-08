@@ -1,4 +1,4 @@
-#laoding libraries
+#loading libraries
 
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
@@ -11,9 +11,8 @@ if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-
 if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
 if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
 if(!require(Matrix)) install.packages("Matrix", repos = "http://cran.us.r-project.org")
-if(!require(Kable)) install.packages("Kable", repos = "http://cran.us.r-project.org")
 if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
-if(!require(Hmisc)) install.packages("Hmisc", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
 
 library(tidyverse)
 library(caret)
@@ -26,8 +25,10 @@ library(kableExtra)
 library(lubridate)
 library(Matrix)
 library(scales)
-library(Hmisc)
+library(dplyr)
 options(digits=4)
+options(warn=-1)
+options(dplyr.summarise.inform = FALSE)
 
 # MovieLens 10M dataset:
 # https://grouplens.org/datasets/movielens/10m/
@@ -73,7 +74,7 @@ edx <- rbind(edx, removed)
 
 rm(dl, ratings, movies, test_index, temp, movielens, removed)
 
-#***************************************************************************#
+#***************************************************************************************
 
 # edx summary and check for NAs
 summary(edx)
@@ -201,9 +202,6 @@ test_index <- createDataPartition(y = edx_mod$rating, times = 1, p = 0.1, list =
 
 train_edx <- edx_mod[-test_index,]
 temp <- edx_mod[test_index,]
-nrow(edx_mod)
-names(test_edx)
-nrow(train_edx)
 
 
 # Check to ensure all 'users' and 'movies' from test are in training set
@@ -231,7 +229,7 @@ rmse_results %>%kable%>%kable_styling(position ="center")
 #summarize mean with movie_bias
 movie_bias <- train_edx %>%
   group_by(movieId) %>%
-  summarize(b_i = mean(rating - mu_hat))
+  summarise(b_i = mean(rating - mu_hat))
 
 sum(is.na(movie_bias))
 #prediction
