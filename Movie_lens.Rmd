@@ -1,0 +1,657 @@
+---
+title: "Movie Lens Recommendation "
+subtitle: "HarvardXPH125.9x Data Science Capstone"
+author: "Sajini Arumugam"
+date: "12/7/2020"
+output:
+  pdf_document:
+    df_print: kable
+    number_sections: yes
+    toc: yes
+    fig_caption: yes
+    includes:
+      in_header: header.tex
+fontsize: 11pt
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+#global options
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align="center",cache = TRUE, fig.path='Figs/',out.width="60%",fig.pos = "!h")
+```
+
+
+\newpage
+
+<!-- # Required packages -->
+
+```{r lib, include=FALSE, eval=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,cache = TRUE)
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(dslabs)) install.packages("dslabs", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+#if(!require(Matrix)) install.packages("Matrix", repos = "http://cran.us.r-project.org")
+#if(!require(Kable)) install.packages("Kable", repos = "http://cran.us.r-project.org")
+```
+
+``` {r loadlib, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,cache = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(dslabs)
+library(knitr)
+library(kableExtra)
+library(lubridate)
+library(Matrix)
+library(scales)
+library(caret)
+library(data.table)
+```
+
+
+# Introduction
+
+This is a part of the HarvardX:PH125.9x Data Science: Capstone course. The goal of the project is to develop a Movie recommendation system that predicts the user ratings (from 0.5 to 5 stars) using the data from the Movie lens 10M data set. It’s provided by the Group lens research lab from the University of Minnesota which contains 10000054 ratings and 95580 tags applied to 10681 movies by 71567 users.
+
+To develop the recommendation we are going to split the data into training and validation sets using the code provided in the course. The final object is to obtain a Root mean square error (RMSE) of less than 0.86490. We are going to be making analysis using different methods and training our model to achieve the goal of minimal RMSE which will then be applied to the validation set.
+\newpage
+
+# Analysis
+
+
+```{r loaddata, include=FALSE}
+#Rdata run and stored in local folder for faster knitting
+
+load("~/GitHub/movie_lens_16.RData")
+```
+
+
+## Loading Data from EDX
+
+```{r datasetup, eval=FALSE, cache=TRUE}
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                 col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+
+# if using R 3.6 or earlier:
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+# if using R 4.0 or later:
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(movieId),
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Validation set will be 10% of MovieLens data
+set.seed(1, sample.kind="Rounding") # if using R 3.5 or earlier, use `set.seed(1)`
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+```
+\newpage
+
+## Exploratory Analysis  
+As you can see the edx training set has `r format (nrow(edx),big.mark=",")` rows and `r format (ncol(edx), big.mark =",")` columns. From the summary we can see that there are no missing values. 
+
+```{r echo=FALSE}
+#summary and check for NA's
+summary(edx)
+sum(is.na(edx))
+```
+
+The columns contain userId, movieId, rating, timestamp, title and genre details. Here is a short preview of the data.
+
+```{r echo=FALSE}
+head(edx)%>% kable %>% kable_styling()
+```
+
+If we examine further we can see that there are 69,878 distinct users and 10,977 distinct movies in the edx data set. Since we are trying to predict the ratings, let’s look at the distribution. 4 is the most common rating with more than 2.5 million ratings followed by 3. The mean is 3.51 among all the ratings given by users. 
+
+```{r summary, eval=FALSE, include=FALSE}
+#distinct userID and movieID
+edx%>% summarise(distinct_user = n_distinct(userId),
+                 distinct_movies = n_distinct(movieId))
+mean(edx$rating)
+```
+ 
+ 
+Some movies are rated more than others which is obvious since people tend to rate blockbuster movies more often than others. ‘Pulp fiction’, ‘Forest gump’ are some of the most rated movies where as there are certain movies that are rated only once. We need to address this since it will affect our model while training, hence we need to introduce some kind of regularization to reduce the errors. We will look into that in the later parts of analysis.  
+
+```{r kable, echo=FALSE}
+edx %>% group_by(title) %>% summarise(n = n()) %>% arrange(desc(n)) %>% top_n(5) %>% kable %>% kable_styling()
+```
+  
+
+We can see from the figure(Figure 1) that 4 and 3 are the most awarded ratings in the Movie Lens data set and very few are rated 1. The mean of the dataset is **_3.51_**. The half ratings were only introduced in the year 2003, so there are less number of half ratings compared to the whole ones. Figure 2 shows the distribution of the rating.
+
+
+```{r - ratings, echo=FALSE, cache=TRUE, fig.cap= "Rating"}
+#rating plot as histogram
+
+edx %>% ggplot(aes(rating)) +
+  geom_histogram(binwidth = 0.25, color = "black", fill = "royalblue3")+
+  scale_y_continuous(breaks = seq(0,2500000,500000))+
+  ggtitle("Movie rating distribution")+
+  theme(plot.title = element_text(hjust = 0.5,size=15,face = "italic"), axis.text = element_text(size=12,face = "bold"),panel.border = element_rect(colour = "gray80", fill=NA, size=1))+labs(x="Rating", y="count")
+```
+
+
+```{r distribution, echo=FALSE, cache=TRUE, fig.cap="Movie Rating distribution"}
+
+# distribution chart
+edx %>% 
+  count(movieId) %>% 
+  ggplot(aes(n)) + 
+  geom_histogram( bins=25, color = "white", fill ="gray20") +
+  scale_x_log10()+ggtitle("Movie rating distribution")+
+  theme(plot.title = element_text(hjust = 0.5,size=15,face = "italic"), axis.text = element_text(size=12,face = "bold"),panel.border = element_rect(colour = "gray80", fill=NA, size=1))+
+  labs(x="n", y="count")
+```
+
+```{r sparseness,echo=FALSE,cache=TRUE,fig.cap = "Sparse chart",strip.white=TRUE}
+
+#sparsechart
+users<- sample(unique(edx$userId),100)
+edx%>% filter(userId %in% users) %>% 
+  select(userId, movieId, rating) %>%
+  mutate(rating = 1) %>%
+  spread(movieId, rating) %>% select(sample(ncol(.), 100)) %>% 
+  as.matrix() %>% t(.) %>%
+  image(1:100, 1:100,. , xlab="Movies", ylab="Users")
+abline(h=0:100+0.5, v=0:100+0.5, col = "grey")
+```
+
+The figure below shows the sparseness of our data set for a sample of 100 movies and 100 users and also the rating distribution per movie.
+
+
+Continuing on the user & rating combination, different users predict a different number of movies and different genre of movies.  Some users are more active than the others, some have rated more than 1000 movies whereas some have only rated a handful. As we can see from the figure, the ratings of most users are anywhere from 20 to 100 movies.
+ 
+```{r user,echo=FALSE, fig.cap="User ratings",out.width="70%"}
+#user distribution
+ edx %>%
+  dplyr::count(userId) %>% 
+  ggplot(aes(n)) + 
+  geom_histogram(bins = 25, color = "white",fill = "cyan4") + 
+  scale_x_log10() +
+  ggtitle("User Distribution")+theme(plot.title = element_text(hjust = 0.5,size=15,face = "italic"), axis.text = element_text(size=12,face = "bold"))+labs(x="No_of_users", y="Rating_count")
+```
+
+
+```{r echo=FALSE,include=FALSE}
+gen<- edx %>% 
+  summarise(n_Genre = n_distinct(genres))
+```
+
+Moving onto the genre column, A movie can be grouped into any number of genre and there are 797 distinct genre combinations in our data set. Here is a table of individual genres. If we look into those titles with more then 100,000 ratings we can see that Drama|War has the highest rating where as Comedy movies have the least (Figure 5).
+
+
+```{r genre, echo=FALSE, cache=TRUE}
+edx %>%
+  separate_rows(genres, sep = "\\|") %>% # separate genres with '|'
+  group_by(genres) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n))%>%kable(col.names = c("Genre","Total rating"),format.args = list(big.mark = ",", 
+  scientific = FALSE))%>%kable_styling()
+```
+
+
+```{r genre1, echo=FALSE,fig.cap="Genres",cache=TRUE,out.width="75%"}
+
+#display genres having more than or equal to 100000 rating
+edx %>% group_by(genres) %>%
+  summarise(n=n(), avg = mean(rating)) %>%
+  filter ( n >=100000) %>%
+  mutate(genres = reorder(genres,avg)) %>%
+  ggplot(aes(avg,genres))+
+  geom_point(color = "royalblue",size = 3)+labs(x="Avg Rating",y="Genre")+theme(axis.text = element_text(size=12,face = "bold"))
+```
+
+\newpage
+
+We are proceeding to look into the title and year of release to see if they have a significant importance in the rating. To better understand this, we are splitting the title into title and year. From the chart we can see that movies prior to 1990s were rated highly than the ones after with the peak between the years 1930 and 1970. After that, the ratings have gradually decreased.
+
+
+
+```{r yearsplit,echo=FALSE,results="hide"}
+
+#splitting yer from title, first with brackets and then without
+edx <- edx %>%
+  mutate(first_split=str_extract(title, regex("\\((\\d{4})\\)")),
+         r_year=str_extract(first_split, regex("(\\d{4})")),
+         r_year= as.numeric(r_year))%>%
+select(-first_split)
+```
+
+
+```{r year, echo=FALSE,fig.cap="Avg rating throughout the years" }
+
+# display plot with ratings over years
+mean = 3.51
+edx %>% group_by(r_year) %>%
+  summarise(n =n(), avg = mean(rating)) %>%
+  ggplot(aes(r_year, avg))+
+  geom_point()+geom_hline(yintercept = mean, color = "red")+labs(x="Release year",y="Avg rating")+theme(axis.text = element_text(size=12,face = "bold"))
+```
+
+```{r include=FALSE}
+edx %>% group_by(r_year) %>% summarise(n = n())%>%
+  kable%>%kable_styling()
+```
+  
+Also, movies prior to 1980s didn’t receive as many ratings as the ones after. Movies with most ratings are over the years of 1994 and 1995. Modern films are closer to the overall mean of the dataset and have tighter variability, which is shown in the figure. Thus adjusting for effects of release year should improve the accuracy of the model.
+
+```{r year1, echo=FALSE,fig.cap="Rating over years in count" }
+
+#count of ratings over years
+edx %>% group_by(r_year) %>%
+  summarise(ratings = n()) %>%
+  ggplot(aes(r_year, ratings)) +
+  geom_bar(stat = "identity", fill = "gray1", color = "white")+
+  scale_y_continuous(labels = comma)+labs(x="Release year",y="no_rating")+
+  theme(axis.text = element_text(size=12,face = "bold"))
+```
+\newpage
+
+# Modelling Methods
+
+Let's move onto modeling now. We will start our predictions with the simple mean of all ratings. Before that we need to go over the concept of RMSE.  Root mean Square Error is the standard deviation of the residuals (prediction errors). Residuals are a measure of how far from the regression line data points are ; RMSE is a measure of how spread out these residuals are.   
+ 
+ 
+```{r}
+RMSE <- function(predicted_ratings, true_ratings){
+  sqrt(mean((predicted_ratings - true_ratings)^2))}
+```
+  
+
+$$RMSE = \sqrt{\frac{1}{N}\sum_{u,i}\left(\hat{y}_{u,i}-y_{u,i}\right)^2}$$
+*$y_{u,i}$* is the rating for movie *$i$* by user *$u$* and *$\hat{y}_{u,i}$* is our prediction with N being the number of user/movie combinations and the sum occurring al over the combinations. We can interpret the RMSE similarly to a standard deviation: it is the typical error we make when predicting a movie rating. If this number is larger than 1 it means out typical error is larger than one star which is not good. Here are working towards reducing the error to __0.86490__ or less.
+
+\newpage
+
+First let us create the test and training sets off of **edx** as instructed
+
+```{r edx-mod,echo=FALSE}
+edx_mod <- edx
+```
+
+```{r val-mod,echo=FALSE}
+#setting validation to validation_mod
+validation_mod <- validation
+
+#first splitting year with brackets from title and removing the temp column in the final data set
+
+validation_mod <- validation_mod %>%
+  mutate(first_split = str_extract(title, regex("\\((\\d{4})\\)")),
+         r_year= str_extract(first_split, regex("(\\d{4})")),
+         r_year =as.numeric(r_year)) %>%
+  select(-first_split)
+```
+
+```{r partition, eval=FALSE}
+#creating test and training set from edx
+set.seed(1, sample.kind="Rounding")
+test_index <- createDataPartition(y = edx_mod$rating, times = 1, p = 0.1, list = FALSE) #90-10 split
+
+train_edx <- edx_mod[-test_index,]
+temp <- edx_mod[test_index,]
+nrow(edx_mod)
+names(test_edx)
+nrow(train_edx)
+
+
+# Check to ensure all 'users' and 'movies' from test are in training set
+test_edx <- temp %>% 
+  semi_join(train_edx, by = "movieId") %>%
+  semi_join(train_edx, by = "userId")
+
+```
+
+```{r loadedx, include=FALSE}
+#split data is stored as Rdata and loaded for faster knitting
+
+load("~/GitHub/edx_partitioned.RData")
+```
+Let's move on to our models now.
+
+
+## Model 1: Mean
+
+Lets start by building the simplest possible recommendation system, we are going to predict same rating for all movies regardless of the user and the movie.
+So we are building a model that assumes the same rating for all movies and all users, with all the differences explained by random variation given as,
+
+$$Y_{u,i}=\mu+\epsilon_{u,i}$$ 
+Where $\mu$ is the true rating and $\epsilon$ is the error sample. 
+
+```{r mean1, echo=FALSE,results='hide'}
+
+#mean across all ratings
+mu_hat <- mean(train_edx$rating)
+mu_hat
+```
+
+```{r mean2, echo = TRUE}
+#prediction
+naive_rmse <- RMSE(test_edx$rating, mu_hat)
+naive_rmse
+```
+
+```{r results1, echo=FALSE}
+#table of results
+rmse_results <- data_frame(method = "Naive_RMSE", RMSE = naive_rmse)
+rmse_results%>%kable%>%kable_styling(position="center")
+```
+
+We get an RMSE value of `r naive_rmse` which is far from our goal.
+  
+  
+
+## Model 2: Movie effect
+
+As we saw from the analysis earlier that different movies are rated differently. We can augment our previous model by adding the term $bi$(*bias*) to represent average ranking for movie $i$. It's represented as,
+
+$$Y_{u,i}=\mu+b_i+\epsilon_{u,i}$$ 
+
+Let's see how our prediction improves once we use the movie bias.
+
+```{r moviebias, echo=FALSE, results='hide'}
+
+#summarise mean with movie_bias
+movie_bias <- train_edx %>%
+  group_by(movieId) %>%
+  summarise(b_i = mean(rating - mu_hat))
+```
+
+```{r moviebias1, echo=FALSE, results='hide'}
+#prediction
+predicted_b_i <- mu_hat + test_edx %>%
+  left_join(movie_bias, by = "movieId")%>%
+              .$b_i
+```
+
+```{r moviebiaspred, echo = TRUE}
+#prediction on test_edx
+movie_rmse <- RMSE(predicted_b_i, test_edx$rating)
+movie_rmse
+
+```
+
+
+```{r results2, echo=FALSE}
+
+#binding result to previous table
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie Effect Model",
+                                     RMSE = movie_rmse ))
+rmse_results %>%kable%>%kable_styling(position="center")
+```
+
+RMSE with movie effect is `r movie_rmse`, let's see if we can do better.
+  
+
+## Model 3: User effect
+
+Some users love every movie whereas some users give low rating even for a good movie. So including a user bias *b_u* along with the movie effect might prove helpful in achieving our desired RMSE. 
+
+
+$$Y_{u,i}=\mu+b_i+b_u+\epsilon_{u,i}$$ 
+
+```{r userbias, echo=FALSE, results='hide'}
+
+#summarise user bias
+user_bias <- train_edx %>%
+  left_join(movie_bias, by = "movieId") %>%
+  group_by(userId) %>%
+  summarise(b_u = mean(rating - mu_hat - b_i))
+```
+
+```{r userpred, echo=FALSE, results='hide'}
+
+#prediction
+predicted_b_u <- test_edx %>%
+  left_join(movie_bias, by = "movieId") %>%
+  left_join(user_bias, by = "userId") %>%
+  mutate(pred = mu_hat + b_i + b_u) %>%
+  .$pred
+```
+
+
+```{r userpred1, echo = TRUE}
+#prediction on test set
+user_rmse <- RMSE(predicted_b_u, test_edx$rating)
+user_rmse
+```
+
+```{r results3, echo=FALSE}
+
+#results table
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie + User Effects Model",  
+                                     RMSE = user_rmse ))
+rmse_results %>% kable%>%kable_styling(position="center")
+```
+
+Brings out an RMSE of `r user_rmse`, onto the next model.
+  
+   
+## Model 4: Release year effect
+
+Let's build on the user model to see if there are any improvements to the RMSE. We already saw that movies prior to 1990s are rated highly than the others and most ratings were given to the movies between 1980 and 2000. Introducing a release year bias will hopefully reduce our RMSE.
+
+$$Y_{u,i}=\mu+b_i+b_u+b_y+\epsilon_{u,i}$$ 
+
+```{r yearbias, echo=FALSE, results='hide'}
+
+#summarise year bias
+year_bias <- train_edx %>%
+  left_join(movie_bias, by = "movieId")%>%
+  left_join(user_bias, by = "userId") %>%
+  group_by(r_year)%>%
+  summarise(b_yr = mean(rating - mu_hat - b_i - b_u))
+```
+
+```{r yearpred, echo=FALSE, results='hide'}
+
+#prediction
+predicted_b_yr <- test_edx %>%
+  left_join(movie_bias, by = "movieId") %>%
+  left_join(user_bias, by = "userId") %>%
+  left_join(year_bias, by ="r_year")%>%
+  mutate(pred = mu_hat + b_i + b_u + b_yr) %>%
+  .$pred
+```
+
+```{r, echo = TRUE}
+#prediction on test set
+release_year_rmse <- RMSE(predicted_b_yr, test_edx$rating)
+release_year_rmse
+```
+
+```{r results4, echo=FALSE}
+#results table
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie + user+Release year Effects Model",  
+                                     RMSE = release_year_rmse ))
+rmse_results %>%kable%>%kable_styling(position="center")
+```
+
+we get an RMSE of `r release_year_rmse`. Let's focus on validation set now.
+
+## Prediction on Validation set
+
+Let's use our model on the validation set now to see how it fairs. We get a RMSE of `r rmse_val` which although is close, is not what we want. So we will look into regularization now.
+
+```{r valpred, echo = TRUE, cache = FALSE}
+# Predicting on the 'Validation' data
+predicted_val <- validation_mod %>%
+  left_join(movie_bias, by = "movieId") %>%
+  left_join(user_bias, by = "userId") %>%
+  left_join(year_bias, by ="r_year")%>%
+  mutate(pred = mu_hat + b_i + b_u + b_yr) %>%
+  .$pred
+predicted_val[is.na(predicted_val)] <- 0 #setting 4NA's to 0
+# prediction
+rmse_val <- RMSE(predicted_val, validation_mod$rating)
+rmse_val
+```
+
+# Regularization
+
+Although our model proved valid, there are some discrepancies in the data.Rmse is not close to what we want. A lot of 5 star movies just were rated once. Here are the top 10 movies according to our estimate using b_i(movie bias).
+
+```{r without, echo=FALSE}
+
+#displaying titles of top movies with least 5 star reviews
+
+movie_titles <- edx_mod %>% 
+  select(movieId, title) %>%
+  distinct()
+
+
+movie_b <- movie_bias %>% left_join(movie_titles, by="movieId")
+
+movie_b%>% arrange(desc(b_i)) %>% slice(1:10)  %>% 
+pull(title)
+```
+
+
+ 
+The best movies were rated by very few users, in most cases just 1. This leads to uncertainty in our model. These noisy estimates in data should not be trusted, since they tend to increase our RMSE value. So we will be rather conservative than unsure. Hence we introduce regularization into the modeling approach.Regularization permits us to penalize large estimates that are formed using small sample sizes.
+
+## Penalized least square estimates
+
+Penalized least squares estimates provide a way to balance fitting the data closely and avoiding excessive roughness or rapid variation.The general idea of penalized regression is to control the total variability of the effects.Specifically, instead of minimizing the least squares equation, we minimize an equation that adds a penalty:
+
+$$\sum_{u,i}\left(y_{u,i}-\mu-b_i\right)^2+\lambda\sum_ib_i^2$$
+
+The first term is just the sum of squares and the second is a penalty that gets larger when many *b_i* are large.
+
+Let's move on to choosing the penalty. $\lambda$ is a tuning parameter, we can use cross validation to choose it. Local tests were done to choose the limits and settled on the one provided in the code below, to reduce run time.
+
+```{r regular, echo=FALSE}
+
+lambdas <- seq(3,6,0.1) #sequence to run lambdas
+
+#function for lambda
+rmses <- sapply(lambdas, function(l){
+
+mu_hat <- mean(train_edx$rating)
+
+b_i <- train_edx %>%
+  group_by(movieId) %>%
+  summarise(b_i =sum(rating - mu_hat)/(n()+l))
+b_u <- train_edx %>%
+  left_join(b_i, by="movieId") %>%
+  group_by(userId) %>%
+  summarise(b_u = sum(rating - b_i - mu_hat)/(n()+l))
+b_yr <- train_edx %>%
+  left_join(b_i, by="movieId") %>%
+  left_join(b_u, by ="userId") %>%
+  group_by(r_year) %>%
+  summarise(b_yr = sum(rating - b_i - b_u - mu_hat)/(n()+l))
+predicted_ratings <- test_edx %>%
+  left_join(b_i, by="movieId") %>%
+  left_join(b_u, by="userId") %>%
+  left_join(b_yr, by="r_year") %>%
+  mutate(pred = mu_hat + b_i +b_u+b_yr) %>%
+  .$pred
+return(RMSE(predicted_ratings, test_edx$rating))
+})
+
+```
+
+```{r qplot, echo = FALSE, fig.cap="Plot of lambdas"}
+#plotting all lambdas
+qplot(lambdas, rmses)
+```
+
+```{r echo = TRUE}
+#displaying which lambda yielded best result
+lambda <- lambdas[which.min(rmses)]
+lambda
+```
+
+
+# Results
+
+We are going to test our model along with the penalty term on the validation set(test out set). For this purpose we will use the model with movie bias, user bias and release year bias.Our penalty term is given as lambda which is `r lambda`.
+
+
+```{r prediction, echo=FALSE, cache=TRUE}
+
+#including lambda(regularization) with predictions
+b_i <- edx_mod %>%
+  group_by(movieId) %>%
+  summarise(b_i = sum(rating - mu_hat)/(n()+lambda))
+
+b_u <- edx_mod %>%
+  left_join(b_i, by="movieId") %>%
+  group_by(userId) %>%
+  summarise(b_u = sum(rating - b_i - mu_hat)/(n()+lambda))
+
+b_yr <- edx_mod %>%
+  left_join(b_i, by="movieId") %>%
+  left_join(b_u, by="userId") %>%
+  group_by(r_year) %>%
+  summarise(b_yr = sum(rating - b_i - b_u - mu_hat)/(n()+lambda))
+```
+
+```{r modelpred, echo=FALSE, cache=TRUE}
+
+#final prediction on validation set
+predicted_ratings_regularized <- validation_mod %>%
+  left_join(b_i, by="movieId") %>%
+  left_join(b_u, by="userId") %>%
+  left_join(b_yr, by="r_year") %>%
+  mutate(pred = mu_hat + b_i + b_u + b_yr) %>%
+  pull(pred)
+```
+
+
+```{r predictionval,echo = TRUE}
+
+#prediction on validation(hand out) set
+validation_rmse <- RMSE(validation_mod$rating, predicted_ratings_regularized)
+validation_rmse
+```
+
+By using the three biases, we are able to bring down the error value to 
+`r valid_rmse` which is under the acceptable limit given by this project. 
+
+  
+# Conclusion
+
+The objective of this project is to analyze the Movies lens 10M dataset and build a recommendation with least errors. Through our analysis, we looked into every category and found out how they affected the ratings. We took into account 3 biases, Movie, User and release year to help reduce our prediction errors. The project statement is to reduce the RMSE to *0.86490* or less and our model produced an error of *`r valid_rmse`* on the final hold out set.
+
+This particular recommendation is built on the ones that were taught in the course. Including another bias will also reduce the error by some value. Although, they didn’t prove much effective in our model, we stuck to just 3 biases. Apart from this, we can also use Matrix factorization, XG boost or KNN.
+
+Matrix factorization is a way to create a matrix when multiplying two different kinds of entities. The idea behind matrix factorization is to represent users and items in a lower dimensional latent space. So, the user is matched against the movies that they have rated and the others will remain blank. Since there will be many missing values due to the fact that users don't rate every single movie, this is not much effective.
+
+KNN does not make any assumptions but it relies on item feature similarity. When KNN makes inference about a movie, KNN will calculate the “distance” between the target movie and every other movie in its database, then it ranks its distances and returns the top K nearest neighbor movies as the most similar movie recommendations.The data will be in a m*n array where m is the number of movies and n is the number of users. Again this will have a sparse data distribution as Matrix factorization. We won't go into much detail about this here considering the scope of the project.
